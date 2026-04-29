@@ -27,14 +27,34 @@ Tool               Install
 Bypass the build-time check with ``CAPELLINI_SKIP_DEP_CHECK=1 pip install -e .``
 (intended only for CI / containers where the tools become available later).
 
-Bundled reference files
------------------------
+Reference FASTAs
+----------------
 
-CAPELLINI ships with two large reference files inside the package so they
-don't need to be re-downloaded or re-derived:
+Two large reference files are not shipped inside the source repo and must
+be fetched separately from the GitHub release:
 
-* ``capellini/data/references/progenome16S.fasta``
-* ``capellini/data/references/spacers/spacers_CompleteCollection.fasta``
+* ``capellini/data/references/progenome16S.fasta`` (~76 MB)
+* ``capellini/data/references/spacers/spacers_CompleteCollection.fasta`` (~74 MB)
 
-To rebuild them from proGenomes3, set ``regenerate_16S_reference: true`` or
-``regenerate_spacers_collection: true`` in the config.
+After installing CAPELLINI, run the bundled downloader to place them in
+the right location inside the installed package:
+
+.. code-block:: bash
+
+   capellini fetch-references
+   # or equivalently
+   capellini-fetch-references
+
+The same action is available from the interactive UI:
+**Main menu → Fetch reference FASTAs from GitHub release**.
+
+If you skip this step, CAPELLINI will fall back to downloading the full
+proGenomes3 source and rebuilding both files at runtime — slower, but
+useful if you intentionally want to regenerate them
+(``regenerate_16S_reference: true`` / ``regenerate_spacers_collection: true``).
+
+To pull from a specific release tag, set ``CAPELLINI_REFERENCES_TAG``:
+
+.. code-block:: bash
+
+   CAPELLINI_REFERENCES_TAG=v0.1.0 capellini fetch-references

@@ -483,6 +483,11 @@ def _demo_menu() -> None:
 
 def main() -> None:
     """Entry point for the `capellini` CLI."""
+    # Lightweight subcommand dispatch before launching the interactive UI.
+    if len(sys.argv) > 1 and sys.argv[1] in {"fetch-references", "fetch_references"}:
+        from capellini.fetch_references import main as _fetch_main
+        sys.exit(_fetch_main(sys.argv[2:]))
+
     _show_logo()
     session = _Session()
     session.ensure_loaded()
@@ -500,6 +505,7 @@ def main() -> None:
                 questionary.Choice("Settings", "settings"),
                 questionary.Choice("Show config", "show"),
                 questionary.Choice("Validate inputs", "validate"),
+                questionary.Choice("Fetch reference FASTAs from GitHub release", "fetch_refs"),
                 questionary.Separator(),
                 questionary.Choice("Quit", "quit"),
             ],
@@ -518,6 +524,18 @@ def main() -> None:
             continue
         if choice == "demo":
             _demo_menu()
+            continue
+        if choice == "fetch_refs":
+            _refresh_screen()
+            from capellini.fetch_references import fetch_references
+            overwrite = _confirm(
+                "Re-download even if the files already exist?", default=False
+            )
+            try:
+                fetch_references(overwrite=overwrite)
+            except RuntimeError as exc:
+                CONSOLE.print(f"[red]{exc}[/red]")
+            _pause()
             continue
         if choice in {"run_all", "show", "validate"}:
             if not session.ensure_loaded():
