@@ -2,3 +2,19 @@ sphinx>=7.0
 sphinx-rtd-theme>=2.0
 myst-parser>=2.0
 sphinx-autobuild>=2024.0
+
+# Runtime deps so autodoc can import the capellini package on RTD
+# (we don't `pip install` the package itself there to avoid the
+# external-tool build-time guard in setup.py)
+biopython>=1.81
+numpy>=1.24
+pandas>=2.0
+scipy>=1.11
+scikit-learn>=1.3
+matplotlib>=3.7
+seaborn>=0.12
+networkx>=3.1
+tqdm>=4.65
+rich>=13.0
+pyyaml>=6.0
+questionary>=2.0
