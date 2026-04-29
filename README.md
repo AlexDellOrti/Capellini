@@ -212,7 +212,7 @@ Live-reload while editing: `make livehtml`.
 If you use CAPELLINI, please cite the paper:
 
 ```
-Pugno D., Dell'Orti A., Tran V., Müller C. L. M.
+Pugno D., Dell'Orti A., Tran V., Müller C. L.
 CAPELLINI: CRISPR-Abundance Phage-Evidence Linkage for Leveraging
 Interaction Network Inference. ECCB 2026.
 ```
