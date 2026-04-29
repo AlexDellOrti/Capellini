@@ -1,0 +1,18 @@
+capellini/data/references/
+*.pyc
+__pycache__/
+dist/
+build/
+*.egg-info/
+.eggs/
+*.bz2
+*.gz
+.DS_Store
+
+# User-local configs (absolute paths, not portable)
+/capellini_config.yaml
+/capellini_ibd_config.yaml
+
+# Sphinx autosummary stubs (generated on build) and HTML output
+docs/source/_autosummary/
+docs/build/
