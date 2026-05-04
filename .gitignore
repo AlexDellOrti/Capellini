@@ -11,7 +11,7 @@ build/
 
 # User-local configs (absolute paths, not portable)
 /capellini_config.yaml
-/capellini_ibd_config.yaml
+/capellini_*_config.yaml
 
 # Sphinx autosummary stubs (generated on build) and HTML output
 docs/source/_autosummary/

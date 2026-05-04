@@ -113,6 +113,13 @@ def _edit_file(path: Path) -> None:
             "Install it: https://github.com/zyedidia/micro  (e.g. `brew install micro`)."
         )
         return
+    CONSOLE.print(
+        "[dim]micro shortcuts:[/dim] "
+        "[bold]Ctrl+S[/bold] save  ·  "
+        "[bold]Ctrl+Q[/bold] quit  ·  "
+        "[bold]Ctrl+G[/bold] full help"
+    )
+    _pause("Press Enter to open the editor…")
     subprocess.call(["micro", str(path)])
 
 
@@ -139,7 +146,136 @@ def _show_config(cfg: CapelliniConfig) -> None:
         CONSOLE.print(table)
 
 
+def _bundled_data_dir() -> Path:
+    """Return the path of the installed capellini.data directory.
+
+    Falls back gracefully when the ``references`` subfolder is not a Python
+    package or doesn't exist (which can happen if the user deleted it).
+    """
+    return Path(str(pkg_resources.files("capellini.data").joinpath(".")))
+
+
+def _bundled_reference_paths() -> tuple[Path, Path]:
+    data = _bundled_data_dir()
+    return (
+        data / "references" / "progenome16S.fasta",
+        data / "references" / "spacers" / "spacers_CompleteCollection.fasta",
+    )
+
+
+def _check_inputs(cfg: CapelliniConfig) -> tuple[list[tuple[str, bool, str]], list[tuple[str, bool, str]]]:
+    """Run all input/dependency checks. Returns (paths, deps) row tuples."""
+    paths: list[tuple[str, bool, str]] = []
+
+    virus = Path(cfg.input_fasta_folder) / cfg.virus_fasta_name if cfg.virus_fasta_name else None
+    paths.append(("Virus FASTA", virus is not None and virus.exists(), str(virus or "")))
+    paths.append(("SILVA reference",
+                  bool(cfg.silva_ref_path) and Path(cfg.silva_ref_path).exists(),
+                  cfg.silva_ref_path or ""))
+    paths.append(("SILVA taxmap",
+                  bool(cfg.silva_taxmap_path) and Path(cfg.silva_taxmap_path).exists(),
+                  cfg.silva_taxmap_path or ""))
+    paths.append(("Bacterial raw FASTA folder",
+                  bool(cfg.bacterial_raw_fasta_folder) and Path(cfg.bacterial_raw_fasta_folder).is_dir(),
+                  cfg.bacterial_raw_fasta_folder or ""))
+    paths.append(("Metadata",
+                  bool(cfg.metadata_path) and Path(cfg.metadata_path).exists(),
+                  cfg.metadata_path or ""))
+
+    try:
+        bundled_16s, bundled_spacers = _bundled_reference_paths()
+        paths.append(("Bundled progenome16S.fasta", bundled_16s.exists(), str(bundled_16s)))
+        paths.append(("Bundled spacers_CompleteCollection.fasta",
+                      bundled_spacers.exists(), str(bundled_spacers)))
+    except (ModuleNotFoundError, FileNotFoundError):
+        paths.append(("Bundled progenome16S.fasta", False, "<not installed>"))
+        paths.append(("Bundled spacers_CompleteCollection.fasta", False, "<not installed>"))
+
+    deps: list[tuple[str, bool, str]] = []
+    for tool in ("spacepharer", "minced", "Rscript", "prodigal", "micro"):
+        deps.append((tool, shutil.which(tool) is not None, ""))
+    mmseqs_ok = shutil.which("mmseqs") is not None or shutil.which("mmseqs2") is not None
+    deps.append(("mmseqs/mmseqs2", mmseqs_ok, ""))
+
+    return paths, deps
+
+
+_REFERENCE_LABELS = {
+    "Bundled progenome16S.fasta",
+    "Bundled spacers_CompleteCollection.fasta",
+}
+
+
+def _preflight_full_pipeline(session: "_Session") -> bool:
+    """Validate inputs before launching the full pipeline.
+
+    Returns True if the pipeline can proceed. Returns False if the user
+    must go back to the main menu (missing inputs/deps), or if they declined
+    to fix missing references.
+    """
+    if not session.ensure_loaded():
+        _pause()
+        return False
+    cfg = session.config
+    paths, deps = _check_inputs(cfg)
+
+    missing_refs = [(n, d) for (n, ok, d) in paths if not ok and n in _REFERENCE_LABELS]
+    missing_paths = [(n, d) for (n, ok, d) in paths if not ok and n not in _REFERENCE_LABELS]
+    missing_deps = [(n, d) for (n, ok, d) in deps if not ok]
+
+    # Case 1: only the bundled references are missing → offer to download.
+    if missing_refs and not missing_paths and not missing_deps:
+        _refresh_screen()
+        CONSOLE.print("[yellow]References not found:[/yellow]")
+        for n, _ in missing_refs:
+            CONSOLE.print(f"  • {n}")
+        CONSOLE.print()
+        if _confirm("Download the missing references now?", default=True):
+            _refresh_screen()
+            from capellini.fetch_references import fetch_references
+            try:
+                fetch_references(overwrite=False)
+            except RuntimeError as exc:
+                CONSOLE.print(f"[red]{exc}[/red]")
+                _pause()
+                return False
+            _pause()
+            # Re-check after the download
+            return _preflight_full_pipeline(session)
+        return False
+
+    # Case 2: anything else is missing → abort with a summary.
+    if missing_refs or missing_paths or missing_deps:
+        _refresh_screen()
+        CONSOLE.print("[red]Cannot start the full pipeline — missing items:[/red]\n")
+        if missing_refs:
+            CONSOLE.print("[bold]References:[/bold]")
+            for n, d in missing_refs:
+                CONSOLE.print(f"  • {n}  [dim]{d}[/dim]")
+            CONSOLE.print()
+        if missing_paths:
+            CONSOLE.print("[bold]Input paths:[/bold]")
+            for n, d in missing_paths:
+                CONSOLE.print(f"  • {n}  [dim]{d or '<empty>'}[/dim]")
+            CONSOLE.print()
+        if missing_deps:
+            CONSOLE.print("[bold]External dependencies:[/bold]")
+            for n, _ in missing_deps:
+                CONSOLE.print(f"  • {n}  [dim]not on PATH[/dim]")
+            CONSOLE.print()
+        _select(
+            "",
+            choices=[questionary.Choice(" » Back to main menu", "back")],
+            default="back",
+        )
+        return False
+
+    return True
+
+
 def _validate_inputs(cfg: CapelliniConfig) -> None:
+    paths, deps = _check_inputs(cfg)
+
     def make_table(title: str) -> Table:
         t = Table(title=title)
         t.add_column("Check", style="cyan", no_wrap=True)
@@ -150,35 +286,13 @@ def _validate_inputs(cfg: CapelliniConfig) -> None:
         marker = "[green]OK[/green]" if ok else "[red]MISSING[/red]"
         t.add_row(name, f"{marker} {detail}".strip())
 
-    # ── Paths ─────────────────────────────────────────────────────────────
     paths_table = make_table("Input paths")
-    virus = Path(cfg.input_fasta_folder) / cfg.virus_fasta_name if cfg.virus_fasta_name else None
-    add_row(paths_table, "Virus FASTA", virus is not None and virus.exists(), str(virus or ""))
-    add_row(paths_table, "SILVA reference",
-            bool(cfg.silva_ref_path) and Path(cfg.silva_ref_path).exists(), cfg.silva_ref_path)
-    add_row(paths_table, "SILVA taxmap",
-            bool(cfg.silva_taxmap_path) and Path(cfg.silva_taxmap_path).exists(), cfg.silva_taxmap_path)
-    add_row(paths_table, "Bacterial raw FASTA folder",
-            bool(cfg.bacterial_raw_fasta_folder) and Path(cfg.bacterial_raw_fasta_folder).is_dir(),
-            cfg.bacterial_raw_fasta_folder)
-    add_row(paths_table, "Metadata",
-            bool(cfg.metadata_path) and Path(cfg.metadata_path).exists(), cfg.metadata_path)
+    for n, ok, d in paths:
+        add_row(paths_table, n, ok, d)
 
-    bundled_16s = pkg_resources.files("capellini.data.references").joinpath("progenome16S.fasta")
-    bundled_spacers = pkg_resources.files("capellini.data.references.spacers").joinpath(
-        "spacers_CompleteCollection.fasta"
-    )
-    add_row(paths_table, "Bundled progenome16S.fasta",
-            Path(str(bundled_16s)).exists(), str(bundled_16s))
-    add_row(paths_table, "Bundled spacers_CompleteCollection.fasta",
-            Path(str(bundled_spacers)).exists(), str(bundled_spacers))
-
-    # ── Dependencies ──────────────────────────────────────────────────────
     deps_table = make_table("External dependencies")
-    for tool in ("spacepharer", "minced", "Rscript", "prodigal", "micro"):
-        add_row(deps_table, tool, shutil.which(tool) is not None)
-    mmseqs_ok = shutil.which("mmseqs") is not None or shutil.which("mmseqs2") is not None
-    add_row(deps_table, "mmseqs/mmseqs2", mmseqs_ok)
+    for n, ok, d in deps:
+        add_row(deps_table, n, ok, d)
 
     CONSOLE.print(paths_table)
     CONSOLE.print()
@@ -387,7 +501,9 @@ def _settings_menu(session: _Session) -> None:
             "Settings",
             choices=[
                 questionary.Choice("Load config (set / change current)", "load"),
-                questionary.Choice("Edit current config (uses micro)", "edit"),
+                questionary.Choice("Edit current config", "edit"),
+                questionary.Choice("Show current config", "show"),
+                questionary.Choice("Validate inputs", "validate"),
                 questionary.Separator(),
                 questionary.Choice(" » Back to main menu", "back"),
             ],
@@ -420,6 +536,16 @@ def _settings_menu(session: _Session) -> None:
             _edit_file(current)
             session.reload()
 
+        elif choice in {"show", "validate"}:
+            if not session.ensure_loaded():
+                _pause()
+                continue
+            _refresh_screen()
+            if choice == "show":
+                _show_config(session.config)
+            else:
+                _validate_inputs(session.config)
+
         _pause()
 
 
@@ -430,17 +556,21 @@ def _selected_stages_menu(session: _Session) -> None:
         return
     stages = list(CapelliniPipeline.STAGE_ORDER)
     labels = CapelliniPipeline.STAGE_LABELS
+    BACK = "__back__"
     while True:
         _refresh_screen()
+        choices = [questionary.Choice(labels.get(s, s), s) for s in stages]
+        choices.append(questionary.Separator())
+        choices.append(questionary.Choice(" » Back to main menu", BACK))
         try:
             picked = questionary.checkbox(
-                "Select stages to run (space to toggle, enter to confirm — leave empty to go back)",
-                choices=[questionary.Choice(labels.get(s, s), s) for s in stages],
+                "Select stages to run (space to toggle, enter to confirm)",
+                choices=choices,
                 qmark="»",
             ).ask()
         except KeyboardInterrupt:
             return
-        if picked is None or not picked:
+        if picked is None or not picked or BACK in picked:
             return
         ordered = [s for s in stages if s in picked]
         _refresh_screen()
@@ -466,6 +596,37 @@ def _single_stage_menu(session: _Session) -> None:
         pipeline = CapelliniPipeline(session.config)
         _live_progress([choice], pipeline.run_stage)
         _pause()
+
+
+def _run_pipeline_menu(session: _Session) -> None:
+    while True:
+        _refresh_screen()
+        choice = _select(
+            "Run pipeline",
+            choices=[
+                questionary.Choice("Run full pipeline", "run_all"),
+                questionary.Choice("Run selected stages", "run_selected"),
+                questionary.Choice("Run single stage", "run_one"),
+                questionary.Separator(),
+                questionary.Choice(" » Back to main menu", "back"),
+            ],
+            default="run_all",
+        )
+        if choice in (None, "back"):
+            return
+        if choice == "run_selected":
+            _selected_stages_menu(session)
+            continue
+        if choice == "run_one":
+            _single_stage_menu(session)
+            continue
+        if choice == "run_all":
+            if not _preflight_full_pipeline(session):
+                continue
+            _refresh_screen()
+            pipeline = CapelliniPipeline(session.config)
+            _live_progress(CapelliniPipeline.STAGE_ORDER, pipeline.run_stage)
+            _pause()
 
 
 def _demo_menu() -> None:
@@ -498,32 +659,25 @@ def main() -> None:
         choice = _select(
             "Main menu",
             choices=[
-                questionary.Choice("Run full pipeline", "run_all"),
-                questionary.Choice("Run selected stages", "run_selected"),
-                questionary.Choice("Run single stage", "run_one"),
+                questionary.Choice("Run pipeline", "run"),
                 questionary.Choice("Demo", "demo"),
                 questionary.Choice("Settings", "settings"),
-                questionary.Choice("Show config", "show"),
-                questionary.Choice("Validate inputs", "validate"),
-                questionary.Choice("Fetch reference FASTAs from GitHub release", "fetch_refs"),
+                questionary.Choice("Fetch/Update reference FASTAs from GitHub release", "fetch_refs"),
                 questionary.Separator(),
                 questionary.Choice("Quit", "quit"),
             ],
-            default="run_all",
+            default="run",
         )
         if choice in (None, "quit"):
             return
-        if choice == "settings":
-            _settings_menu(session)
-            continue
-        if choice == "run_one":
-            _single_stage_menu(session)
-            continue
-        if choice == "run_selected":
-            _selected_stages_menu(session)
+        if choice == "run":
+            _run_pipeline_menu(session)
             continue
         if choice == "demo":
             _demo_menu()
+            continue
+        if choice == "settings":
+            _settings_menu(session)
             continue
         if choice == "fetch_refs":
             _refresh_screen()
@@ -537,20 +691,6 @@ def main() -> None:
                 CONSOLE.print(f"[red]{exc}[/red]")
             _pause()
             continue
-        if choice in {"run_all", "show", "validate"}:
-            if not session.ensure_loaded():
-                _pause()
-                continue
-            cfg = session.config
-            _refresh_screen()
-            if choice == "run_all":
-                pipeline = CapelliniPipeline(cfg)
-                _live_progress(CapelliniPipeline.STAGE_ORDER, pipeline.run_stage)
-            elif choice == "show":
-                _show_config(cfg)
-            elif choice == "validate":
-                _validate_inputs(cfg)
-            _pause()
 
 
 if __name__ == "__main__":
