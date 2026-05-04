@@ -4,6 +4,8 @@
 
 # CAPELLINI
 
+[![Documentation Status](https://readthedocs.org/projects/capellini/badge/?version=latest)](https://capellini.readthedocs.io/en/latest/)
+
 **CRISPR-Abundance Phage-Evidence Linkage for Leveraging Interaction Network Inference**
 
 CAPELLINI is an integrative method for inferring phage–host interactions from
