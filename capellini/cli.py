@@ -556,22 +556,31 @@ def _selected_stages_menu(session: _Session) -> None:
         return
     stages = list(CapelliniPipeline.STAGE_ORDER)
     labels = CapelliniPipeline.STAGE_LABELS
-    BACK = "__back__"
     while True:
         _refresh_screen()
-        choices = [questionary.Choice(labels.get(s, s), s) for s in stages]
-        choices.append(questionary.Separator())
-        choices.append(questionary.Choice(" » Back to main menu", BACK))
+        outer = _select(
+            "Run selected stages",
+            choices=[
+                questionary.Choice("Pick stages to run", "pick"),
+                questionary.Separator(),
+                questionary.Choice(" » Back to main menu", "back"),
+            ],
+            default="pick",
+        )
+        if outer in (None, "back"):
+            return
+        _refresh_screen()
         try:
             picked = questionary.checkbox(
-                "Select stages to run (space to toggle, enter to confirm)",
-                choices=choices,
+                "Toggle stages with [space], confirm with [enter] "
+                "(confirm with no selection to go back)",
+                choices=[questionary.Choice(labels.get(s, s), s) for s in stages],
                 qmark="»",
             ).ask()
         except KeyboardInterrupt:
-            return
-        if picked is None or not picked or BACK in picked:
-            return
+            continue
+        if not picked:
+            continue
         ordered = [s for s in stages if s in picked]
         _refresh_screen()
         pipeline = CapelliniPipeline(session.config)
